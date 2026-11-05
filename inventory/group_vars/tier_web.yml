@@ -1,0 +1,4 @@
+---
+# The rule for this tier, as data. Allowed to be down at once = hosts - minimum.
+reboot_policy:
+  min_available: 1

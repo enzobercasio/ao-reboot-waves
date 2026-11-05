@@ -1,0 +1,45 @@
+---
+# Report the end of a run.
+#   mode=complete   everything rebooted; print the closing state
+#   mode=exception  something needs a person; fail with the reason
+- import_playbook: lib/probe.yml
+
+- name: Report the state of the fleet
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    mode: complete
+    run_token: adhoc
+    max_attempts: 2
+  tasks:
+    - name: Build the live view
+      ansible.builtin.include_tasks: lib/live_view.yml
+
+    - name: Plan what could go next
+      ansible.builtin.include_tasks: lib/plan_core.yml
+
+    - name: Print the closing state
+      ansible.builtin.debug:
+        msg: "REPORT mode={{ mode }} {{ item.tier }} healthy={{ item.healthy }}/{{ item.instances }} minimum={{ item.minimum }} pending={{ item.pending }}"
+      loop: "{{ plan_rows }}"
+      loop_control:
+        label: "{{ item.tier }}"
+
+    - name: Fail with the reason when a person is needed
+      ansible.builtin.fail:
+        msg: >-
+          NEEDS A PERSON.
+          Tiers below minimum: {{ plan_rows | selectattr('below_min') | map(attribute='tier') | list | join(',') or 'none' }}.
+          Quarantined after {{ max_attempts }} attempts: {{ plan_quarantined | join(',') or 'none' }}.
+          Unhealthy and pending: {{ plan_down | join(',') or 'none' }}.
+          Still pending: {{ plan_pending | join(',') or 'none' }}.
+          Fix the hosts, then use Retry run: a new run gets a fresh attempt budget.
+      when: mode == 'exception'
+
+    - name: Publish the closing state
+      ansible.builtin.set_stats:
+        per_host: false
+        data:
+          pending: "{{ plan_pending }}"
+          quarantined: "{{ plan_quarantined }}"

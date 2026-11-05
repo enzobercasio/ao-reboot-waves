@@ -1,0 +1,5 @@
+---
+# Keep all but one database up (quorum). A single-database tier is never
+# taken down, because a tier is never emptied unless allow_full_outage is true.
+reboot_policy:
+  max_unavailable: 1

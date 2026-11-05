@@ -1,0 +1,3 @@
+---
+reboot_policy:
+  min_available: 2

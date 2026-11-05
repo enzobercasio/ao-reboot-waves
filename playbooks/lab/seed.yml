@@ -1,0 +1,52 @@
+---
+# Lab only. Write a fresh state for every host before a run.
+#   scenario: happy | flaky | stubborn | collateral | blocked | heal
+# heal = an operator fixed the broken hosts: clear faults and unhealthy flags
+# and keep what is still pending.
+- name: Seed the lab state
+  hosts: storefront
+  gather_facts: false
+  vars_files:
+    - scenarios.yml
+  vars:
+    scenario: happy
+  tasks:
+    - name: Make the state directory
+      ansible.builtin.file:
+        path: "{{ lab_state_dir }}"
+        state: directory
+        mode: "0755"
+      run_once: true
+
+    - name: Write a fresh state
+      ansible.builtin.copy:
+        dest: "{{ lab_state_dir }}/{{ inventory_hostname }}.json"
+        mode: "0644"
+        content: "{{ fresh | to_nice_json }}\n"
+      vars:
+        fresh:
+          pending: true
+          healthy: "{{ inventory_hostname not in (unhealthy_at_start[scenario] | default([])) }}"
+          attempts: 0
+          attempt_token: ""
+          fault: "{{ scenarios[scenario][inventory_hostname] | default({'remaining': 0, 'mode': 'fail'}) }}"
+      when: scenario != 'heal'
+
+    - name: Repair what an operator would repair
+      when: scenario == 'heal'
+      block:
+        - name: Read the state
+          ansible.builtin.slurp:
+            src: "{{ lab_state_dir }}/{{ inventory_hostname }}.json"
+          register: heal_raw
+
+        - name: Clear faults and unhealthy flags
+          ansible.builtin.copy:
+            dest: "{{ lab_state_dir }}/{{ inventory_hostname }}.json"
+            mode: "0644"
+            content: "{{ (heal_raw.content | b64decode | from_json) | combine({'healthy': true, 'attempts': 0, 'attempt_token': '', 'fault': {'remaining': 0, 'mode': 'fail'}}) | to_nice_json }}\n"
+
+    - name: Say what was seeded
+      ansible.builtin.debug:
+        msg: "SEED scenario={{ scenario }} {{ inventory_hostname }}"
+      run_once: true

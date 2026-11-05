@@ -1,0 +1,17 @@
+---
+# Faults to inject, by host. remaining = how many reboot attempts fail.
+scenarios:
+  happy: {}
+  # web-02 fails once; the next wave retries it and it succeeds.
+  flaky:
+    web-02: {remaining: 1, mode: fail}
+  # db-01 never reboots. It is quarantined after the attempt budget and the
+  # rest of the fleet carries on. The run then stops with a report.
+  stubborn:
+    db-01: {remaining: 99, mode: fail}
+  # app-01 fails and takes app-03 and app-04 down with it: a tier drops below
+  # its minimum, which no plan could have foreseen.
+  collateral:
+    app-01: {remaining: 99, mode: no_return, also_down: [app-03, app-04]}
+unhealthy_at_start:
+  blocked: [web-02, web-03, web-04, app-03, app-04, db-03]

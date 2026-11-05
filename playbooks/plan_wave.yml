@@ -1,0 +1,46 @@
+---
+# Plan one wave from the live fleet. Publishes the host list for each tier job.
+- import_playbook: lib/probe.yml
+
+- name: Plan one quorum-safe wave
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    run_token: adhoc
+    max_attempts: 2
+  tasks:
+    - name: Build the live view
+      ansible.builtin.include_tasks: lib/live_view.yml
+
+    - name: Plan the wave
+      ansible.builtin.include_tasks: lib/plan_core.yml
+
+    - name: Publish the plan to Automation Orchestrator
+      ansible.builtin.set_stats:
+        per_host: false
+        data: "{{ stats | combine(per_tier) }}"
+      vars:
+        stats:
+          selected_hosts: "{{ plan_flat }}"
+          selected_count: "{{ plan_flat | length }}"
+          pending_count: "{{ plan_pending | length }}"
+          quarantined: "{{ plan_quarantined }}"
+          down: "{{ plan_down }}"
+          rows: "{{ plan_rows }}"
+        per_tier: "{{ dict(plan_selected.keys() | map('regex_replace', '^', 'reboot_') | zip(plan_selected.values())) }}"
+
+    - name: Print the wave header
+      ansible.builtin.debug:
+        msg: "PLAN selected={{ plan_flat | length }} pending={{ plan_pending | length }} quarantined={{ plan_quarantined | join(',') }} down={{ plan_down | join(',') }}"
+
+    - name: Print the tier table
+      ansible.builtin.debug:
+        msg: "TABLE tier={{ item.tier }} instances={{ item.instances }} healthy={{ item.healthy }} pending={{ item.pending }} minimum={{ item.minimum }} max_allowed={{ item.max_allowed }}"
+      loop: "{{ plan_rows }}"
+      loop_control:
+        label: "{{ item.tier }}"
+
+    - name: Print the batch
+      ansible.builtin.debug:
+        msg: "BATCH {% for t, h in plan_selected.items() %}{{ t }}={{ h | join(',') }} {% endfor %}"

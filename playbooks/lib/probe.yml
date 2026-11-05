@@ -1,0 +1,20 @@
+---
+# Probe: read the live state of every fleet host. Imported by every job that
+# needs to know "what is true right now".
+#
+# Lab: each host's state is a small JSON file on the lab VM.
+# Production: replace the slurp with real checks, keep the same `live` shape:
+#   pending   <- `needs-restarting -r` (rc 1) or a patch-compliance fact
+#   healthy   <- the service health check or monitoring API for that host
+- name: Probe the live state of every host
+  hosts: storefront
+  gather_facts: false
+  tasks:
+    - name: Read this host's state
+      ansible.builtin.slurp:
+        src: "{{ lab_state_dir }}/{{ inventory_hostname }}.json"
+      register: probe_raw
+
+    - name: Keep it as `live`
+      ansible.builtin.set_fact:
+        live: "{{ probe_raw.content | b64decode | from_json }}"

@@ -1,0 +1,16 @@
+---
+# One simulated wave, assuming every selected host reboots cleanly.
+- name: Plan the wave
+  ansible.builtin.include_tasks: plan_core.yml
+
+- name: Stop when nothing more can be scheduled
+  ansible.builtin.set_fact:
+    fc_done: "{{ (plan_flat | length) == 0 }}"
+
+- name: Record the wave and apply it to the simulated fleet
+  ansible.builtin.set_fact:
+    fc_waves: "{{ fc_waves + [{'wave': wave_no, 'count': plan_flat | length, 'hosts': plan_selected}] }}"
+    live_view: "{{ live_view | combine(applied) }}"
+  vars:
+    applied: "{{ dict(plan_flat | zip(plan_flat | map('extract', live_view) | map('combine', {'pending': false}))) }}"
+  when: (plan_flat | length) > 0

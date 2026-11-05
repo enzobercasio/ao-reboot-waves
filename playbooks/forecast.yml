@@ -1,0 +1,54 @@
+---
+# Forecast: the whole schedule, before anything reboots. Read-only.
+- import_playbook: lib/probe.yml
+
+- name: Forecast every wave from the live fleet
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    max_attempts: 2
+  tasks:
+    - name: Build the live view
+      ansible.builtin.include_tasks: lib/live_view.yml
+
+    - name: Start a forecast
+      ansible.builtin.set_fact:
+        run_token: "{{ now(utc=true).strftime('%Y%m%dT%H%M%SZ') }}"
+        fc_waves: []
+        fc_done: false
+
+    - name: Simulate waves until nothing more can move
+      ansible.builtin.include_tasks: lib/forecast_step.yml
+      loop: "{{ range(1, 21) | list }}"
+      loop_control:
+        loop_var: wave_no
+      when: not fc_done
+
+    - name: Work out the summary
+      ansible.builtin.set_fact:
+        unschedulable: "{{ live_view | dict2items | selectattr('value.pending') | map(attribute='key') | sort | list }}"
+        peak: "{{ fc_waves | map(attribute='count') | max | default(0) }}"
+        summary: "{% for w in fc_waves %}Wave {{ w.wave }}: {{ w.count }} reboots ({% for t, h in w.hosts.items() %}{{ t }} {{ h | length }}{{ ', ' if not loop.last else '' }}{% endfor %}){{ ' | ' if not loop.last else '' }}{% endfor %}"
+
+    - name: Publish the forecast to Automation Orchestrator
+      ansible.builtin.set_stats:
+        per_host: false
+        data:
+          run_token: "{{ run_token }}"
+          waves: "{{ fc_waves }}"
+          wave_count: "{{ fc_waves | length }}"
+          peak_concurrency: "{{ peak | int }}"
+          unschedulable: "{{ unschedulable }}"
+          summary: "{{ summary }}{{ ' | Cannot be scheduled: ' ~ (unschedulable | join(', ')) if unschedulable | length > 0 else '' }}"
+
+    - name: Print the forecast
+      ansible.builtin.debug:
+        msg: "FORECAST wave={{ item.wave }} reboots={{ item.count }} {% for t, h in item.hosts.items() %}{{ t }}={{ h | join(',') }} {% endfor %}"
+      loop: "{{ fc_waves }}"
+      loop_control:
+        label: "wave {{ item.wave }}"
+
+    - name: Print the totals
+      ansible.builtin.debug:
+        msg: "FORECAST waves={{ fc_waves | length }} peak_concurrency={{ peak }} unschedulable={{ unschedulable | join(',') }}"

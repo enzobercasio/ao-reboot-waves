@@ -1,0 +1,58 @@
+---
+# LAB SHIM. A real reboot needs none of this: the host's own reboot and health
+# checks decide the outcome. The shim records the result in this host's state
+# file so the probe has something to read, and injects the faults a scenario
+# asks for. It counts attempts per run_token so a new run starts with a fresh
+# budget.
+- name: Read this host's state
+  ansible.builtin.slurp:
+    src: "{{ lab_state_dir }}/{{ inventory_hostname }}.json"
+  register: sim_raw
+
+- name: Work out what to do
+  ansible.builtin.set_fact:
+    sim: "{{ sim_raw.content | b64decode | from_json }}"
+    sim_token: "{{ run_token | default('adhoc') }}"
+
+- name: Skip a host that no longer needs a reboot
+  ansible.builtin.debug:
+    msg: "SKIP {{ inventory_hostname }}: no reboot required"
+  when: not sim.pending
+
+- name: Act on a host that needs a reboot
+  when: sim.pending
+  vars:
+    prior: "{{ sim.attempts | int if sim.attempt_token == sim_token else 0 }}"
+    fault: "{{ sim.fault | default({'remaining': 0, 'mode': 'fail'}) }}"
+  block:
+    - name: Simulated failure
+      when: (fault.remaining | int) > 0
+      block:
+        - name: Record the failed attempt
+          ansible.builtin.copy:
+            dest: "{{ lab_state_dir }}/{{ inventory_hostname }}.json"
+            mode: "0644"
+            content: "{{ sim | combine({'attempts': (prior | int) + 1, 'attempt_token': sim_token, 'healthy': fault.mode != 'no_return', 'fault': fault | combine({'remaining': (fault.remaining | int) - 1})}) | to_nice_json }}\n"
+
+        - name: Take collateral hosts down with it
+          ansible.builtin.include_tasks: down_other.yml
+          loop: "{{ fault.also_down | default([]) }}"
+          loop_control:
+            loop_var: other
+
+        - name: Fail this reboot on purpose
+          ansible.builtin.fail:
+            msg: "SIMULATED FAILURE reboot {{ inventory_hostname }} mode={{ fault.mode }} attempt={{ (prior | int) + 1 }}"
+
+    - name: Reboot succeeded
+      when: (fault.remaining | int) == 0
+      block:
+        - name: Mark the host patched and healthy, attempts cleared
+          ansible.builtin.copy:
+            dest: "{{ lab_state_dir }}/{{ inventory_hostname }}.json"
+            mode: "0644"
+            content: "{{ sim | combine({'pending': false, 'healthy': true, 'attempts': 0, 'attempt_token': sim_token}) | to_nice_json }}\n"
+
+        - name: Print the reboot
+          ansible.builtin.debug:
+            msg: "REBOOT {{ inventory_hostname }} done and healthy"

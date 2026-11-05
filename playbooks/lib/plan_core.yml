@@ -1,0 +1,21 @@
+---
+# Plan one wave from live_view. Caller sets live_view, run_token, max_attempts.
+# Sets: plan_rows, plan_selected, plan_quarantined, plan_down, plan_flat,
+#       plan_pending.
+- name: Reset the plan
+  ansible.builtin.set_fact:
+    plan_rows: []
+    plan_selected: {}
+    plan_quarantined: []
+    plan_down: []
+
+- name: Plan each tier named tier_*
+  ansible.builtin.include_tasks: plan_tier.yml
+  loop: "{{ groups | dict2items | selectattr('key', 'match', '^tier_') | map(attribute='key') | sort | list }}"
+  loop_control:
+    loop_var: tier_group
+
+- name: Summarise the wave
+  ansible.builtin.set_fact:
+    plan_flat: "{{ plan_selected.values() | flatten | sort | list }}"
+    plan_pending: "{{ live_view | dict2items | selectattr('value.pending') | map(attribute='key') | sort | list }}"

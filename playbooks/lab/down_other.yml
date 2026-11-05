@@ -1,0 +1,12 @@
+---
+# Lab only: a failing host drags another host down with it (a shared dependency).
+- name: Read the other host
+  ansible.builtin.slurp:
+    src: "{{ lab_state_dir }}/{{ other }}.json"
+  register: other_raw
+
+- name: Mark it unhealthy
+  ansible.builtin.copy:
+    dest: "{{ lab_state_dir }}/{{ other }}.json"
+    mode: "0644"
+    content: "{{ (other_raw.content | b64decode | from_json) | combine({'healthy': false}) | to_nice_json }}\n"

@@ -1,0 +1,38 @@
+---
+# Inventory for the Svc-A reboot demo (4 web, 4 app, 3 database).
+# In AAP, add this file as an inventory source of type "Sourced from a Project"
+# so the group variables in group_vars/ come with it.
+#
+# Every host is an alias of ONE lab VM (lab_host). The playbooks keep a small
+# state file per host on that VM, so no real server is rebooted and the demo
+# needs one SSH target, not eleven. In production the aliases go away and the
+# probe in playbooks/lib/probe.yml reads the real hosts.
+all:
+  vars:
+    lab_host: REPLACE_WITH_LAB_VM_ADDRESS
+    ansible_user: ec2-user
+    ansible_host: "{{ lab_host }}"
+    lab_state_dir: /var/tmp/reboot-waves
+  children:
+    storefront:
+      children:
+        tier_web:
+        tier_app:
+        tier_db:
+    tier_web:
+      hosts:
+        web-01:
+        web-02:
+        web-03:
+        web-04:
+    tier_app:
+      hosts:
+        app-01:
+        app-02:
+        app-03:
+        app-04:
+    tier_db:
+      hosts:
+        db-01:
+        db-02:
+        db-03:

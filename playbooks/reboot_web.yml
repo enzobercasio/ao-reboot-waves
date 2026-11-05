@@ -1,0 +1,39 @@
+---
+# STAND-IN for the customer's existing "reboot the web tier" playbook.
+# The workflow needs three things from the real one:
+#   1. it takes the hosts to reboot as the extra variable reboot_hosts (a list)
+#   2. it reboots ONLY those hosts, and nothing when the list is empty or missing
+#   3. it fails the job if any host does not come back
+# If the real playbook cannot take a list, wrap it, or pass a Limit; but never
+# let an empty list turn into an empty Limit, which Ansible reads as "all hosts".
+- name: Reboot the web tier hosts we were asked to (web tier)
+  hosts: tier_web
+  gather_facts: false
+  vars:
+    reboot_list: "{{ (reboot_hosts | default([])) if ((reboot_hosts | default([])) is not string) else (reboot_hosts | from_json) }}"
+  tasks:
+    - name: Reboot this host if it is on the list
+      when: inventory_hostname in reboot_list
+      block:
+        - name: drain from the load balancer (dummy)
+          ansible.builtin.debug:
+            msg: "WEB {{ inventory_hostname }}: drain from the load balancer"
+
+        - name: Reboot (the lab shim updates the state file; a real play reboots here)
+          ansible.builtin.include_tasks: lab/sim_reboot.yml
+
+        - name: health check passed, back in the load balancer (dummy)
+          ansible.builtin.debug:
+            msg: "WEB {{ inventory_hostname }}: health check passed, back in the load balancer"
+
+- name: Say so when nothing was asked of this tier
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    reboot_list: "{{ (reboot_hosts | default([])) if ((reboot_hosts | default([])) is not string) else (reboot_hosts | from_json) }}"
+  tasks:
+    - name: No hosts for this tier
+      ansible.builtin.debug:
+        msg: "NOOP web: nothing to reboot this wave"
+      when: reboot_list | length == 0

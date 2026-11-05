@@ -1,0 +1,56 @@
+---
+# Verify: probe the truth after a wave and classify the outcome.
+#   complete  nothing is pending
+#   clean     the wave went through, more waves to go
+#   partial   some selected hosts are still pending; a later wave retries them
+#   stuck     work remains but nothing can be scheduled
+#   unsafe    a tier is below its minimum
+- import_playbook: lib/probe.yml
+
+- name: Verify the wave against the live fleet
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    run_token: adhoc
+    max_attempts: 2
+    wave_selected: []
+  tasks:
+    - name: Build the live view
+      ansible.builtin.include_tasks: lib/live_view.yml
+
+    - name: Plan what could go next
+      ansible.builtin.include_tasks: lib/plan_core.yml
+
+    - name: Classify the outcome
+      ansible.builtin.set_fact:
+        outcome: "{{ 'unsafe' if broken | length > 0 else ('complete' if plan_pending | length == 0 else ('stuck' if plan_flat | length == 0 else ('partial' if failed | length > 0 else 'clean'))) }}"
+        failed: "{{ failed }}"
+        broken: "{{ broken }}"
+      vars:
+        selected_list: "{{ wave_selected if (wave_selected is not string) else (wave_selected | from_json) }}"
+        failed: "{{ selected_list | intersect(plan_pending) | sort }}"
+        broken: "{{ plan_rows | selectattr('below_min') | map(attribute='tier') | list }}"
+
+    - name: Publish the outcome to Automation Orchestrator
+      ansible.builtin.set_stats:
+        per_host: false
+        data:
+          outcome: "{{ outcome }}"
+          gate: "{{ 'continue' if outcome in ['clean', 'partial'] else 'done' }}"
+          failed_hosts: "{{ failed }}"
+          pending_count: "{{ plan_pending | length }}"
+          quarantined: "{{ plan_quarantined }}"
+          down: "{{ plan_down }}"
+          broken_tiers: "{{ broken }}"
+
+    - name: Print the outcome
+      ansible.builtin.debug:
+        msg: "VERIFY outcome={{ outcome }} pending={{ plan_pending | length }} failed={{ failed | join(',') }} broken={{ broken | join(',') }} quarantined={{ plan_quarantined | join(',') }}"
+
+    - name: Print the tiers against their minimums
+      ansible.builtin.debug:
+        msg: "TIER {{ item.tier }} healthy={{ item.healthy }}/{{ item.instances }} minimum={{ item.minimum }} pending={{ item.pending }}"
+      loop: "{{ plan_rows }}"
+      loop_control:
+        label: "{{ item.tier }}"

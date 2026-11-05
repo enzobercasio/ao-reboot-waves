@@ -1,0 +1,5 @@
+---
+# Collect each host's `live` fact into one dict: live_view[host] = {...}
+- name: Build the live view of the fleet
+  ansible.builtin.set_fact:
+    live_view: "{{ dict(groups.storefront | zip(groups.storefront | map('extract', hostvars, 'live'))) }}"

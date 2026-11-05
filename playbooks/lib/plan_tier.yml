@@ -1,0 +1,36 @@
+---
+# Plan one tier. Caller sets tier_group (for example tier_web), live_view,
+# run_token and max_attempts. Appends to plan_rows and plan_selected.
+- name: Plan this tier
+  ansible.builtin.set_fact:
+    plan_rows: "{{ plan_rows | default([]) + [row] }}"
+    plan_selected: "{{ plan_selected | default({}) | combine({tier_name: chosen}) }}"
+    plan_quarantined: "{{ plan_quarantined | default([]) + quarantined }}"
+    plan_down: "{{ plan_down | default([]) + down }}"
+  vars:
+    tier_name: "{{ tier_group | regex_replace('^tier_', '') }}"
+    members: "{{ groups[tier_group] | sort }}"
+    policy: "{{ hostvars[members | first].reboot_policy }}"
+    count: "{{ members | length }}"
+    entries: "{{ live_view | dict2items | selectattr('key', 'in', members) | list }}"
+    healthy_entries: "{{ entries | selectattr('value.healthy') | list }}"
+    # attempts only count inside the run that made them (run_token)
+    wanted_min: "{{ policy.min_available | int if 'min_available' in policy else (count | int) - (policy.max_unavailable | int) }}"
+    minimum: "{{ wanted_min | int if (policy.allow_full_outage | default(false) | bool) else ([wanted_min | int, 1] | max) }}"
+    pending_ok: "{{ healthy_entries | selectattr('value.pending') | list }}"
+    candidates: "{{ pending_ok | rejectattr('key', 'in', exhausted) | map(attribute='key') | sort | list }}"
+    exhausted: "{{ pending_ok | selectattr('key', 'in', spent_names) | map(attribute='key') | list }}"
+    spent_names: "{{ entries | selectattr('value.attempt_token', 'equalto', run_token) | selectattr('value.attempts', 'ge', max_attempts | int) | map(attribute='key') | list }}"
+    quarantined: "{{ exhausted | sort | list }}"
+    down: "{{ entries | rejectattr('value.healthy') | selectattr('value.pending') | map(attribute='key') | sort | list }}"
+    room: "{{ [(healthy_entries | length) - (minimum | int), 0] | max }}"
+    max_allowed: "{{ [candidates | length, room | int] | min }}"
+    chosen: "{{ candidates[:(max_allowed | int)] }}"
+    row:
+      tier: "{{ tier_name }}"
+      instances: "{{ count | int }}"
+      healthy: "{{ healthy_entries | length }}"
+      pending: "{{ entries | selectattr('value.pending') | list | length }}"
+      minimum: "{{ minimum | int }}"
+      max_allowed: "{{ max_allowed | int }}"
+      below_min: "{{ (healthy_entries | length) < (minimum | int) }}"
