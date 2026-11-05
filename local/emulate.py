@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Emulate the `reboot-waves` Automation Orchestrator workflow on a laptop.
 
-The canvas runs the Switch, the Approval, the do-while loop, the three parallel
-tier jobs, the Converge and the second Switch. This script does the same in the
+The canvas runs the Approval, the do-while loop, the three parallel tier jobs,
+the Converge and the outcome Switch. This script does the same in the
 same order so the data they pass can be checked: waves, outcomes, retries,
 quarantine, an unsafe tier, a stuck run and a restart.
 
@@ -53,19 +53,15 @@ def host_states(state_dir):
     return {p.stem: json.loads(p.read_text()) for p in Path(state_dir).glob("*.json")}
 
 
-def workflow(state_dir, inventory="storefront", dry_run=False, approve=True,
-             require_approval=True, max_attempts=2):
+def workflow(state_dir, inventory="storefront", approve=True, max_attempts=2):
     """One execution of the workflow. Returns a dict describing the run."""
     run = {"waves": [], "verifies": [], "ended": None, "report": ""}
     # forecast
     _, _, fc = ap("forecast.yml", state_dir, {"max_attempts": max_attempts}, inventory, check=True)
     run["forecast"] = fc
     token = fc["run_token"]
-    # launch_mode (Switch): dry_run, then approve, else straight on (Converge: any)
-    if dry_run:
-        run["ended"] = "dry_run"
-        return run
-    if require_approval and not approve:
+    # approve_plan (Approval): Rejected is unconnected, so the run ends
+    if not approve:
         run["ended"] = "rejected"
         return run
     # wave_loop (do-while)
@@ -125,14 +121,6 @@ def s_happy(base):
     got = [{t: p[f"reboot_{t}"] for t in ("web", "app", "db")} for p in run["waves"]]
     check("happy", fc_hosts == got, "executed waves match the forecast exactly")
     check("happy", run["forecast"]["peak_concurrency"] == 6, "forecast peak concurrency is 6")
-
-
-def s_dry_run(base):
-    d = str(base / "dry"); seed(d, "happy")
-    before = host_states(d)
-    run = workflow(d, dry_run=True)
-    check("dry_run", run["ended"] == "dry_run" and run["forecast"]["wave_count"] == 3, "forecast shows 3 waves and stops")
-    check("dry_run", host_states(d) == before, "no host state changed")
 
 
 def s_reject(base):
@@ -202,7 +190,7 @@ def s_solo_db(base):
 
 def main():
     base = Path(tempfile.mkdtemp(prefix="reboot-waves-"))
-    scenarios = [s_happy, s_dry_run, s_reject, s_flaky, s_stubborn, s_collateral, s_blocked, s_flex, s_solo_db]
+    scenarios = [s_happy, s_reject, s_flaky, s_stubborn, s_collateral, s_blocked, s_flex, s_solo_db]
     with ThreadPoolExecutor(max_workers=int(os.environ.get("EMULATE_WORKERS", "5"))) as pool:
         futures = [(s.__name__, pool.submit(s, base)) for s in scenarios]
         for name, f in futures:

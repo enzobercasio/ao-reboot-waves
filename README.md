@@ -22,7 +22,7 @@ pip install ansible-core
 python3 local/emulate.py
 ```
 
-`local/emulate.py` plays the part of the Orchestrator: the launch Switch, the do-while loop, the three parallel tier jobs, the Converge and the outcome Switch. It runs nine scenarios and checks what each wave does.
+`local/emulate.py` plays the part of the Orchestrator: the Approval, the do-while loop, the three parallel tier jobs, the Converge and the outcome Switch. It runs eight scenarios and checks what each wave does.
 
 Try a single job by hand:
 
@@ -85,14 +85,11 @@ Job templates (inventory `storefront`, project above, Machine credential; enable
 
 ## The workflow on the canvas
 
-Name `reboot-waves`. Manual trigger with three inputs: `dry_run` (boolean), `require_approval` (boolean), `max_attempts` (integer, 2). Expressions follow the catalog form `${node_id.field}`; use the token the builder inserts if it differs.
+Name `reboot-waves`. Manual trigger with one input: `max_attempts` (integer, 2). Every run waits for approval after the forecast. Expressions follow the catalog form `${node_id.field}`; use the token the builder inserts if it differs.
 
 ```text
-trigger -> forecast -> launch_mode (Switch)
-   dry_run  ----------------------------------------> end
-   approve  -> approve_plan (Approval) -Approved-> go (Converge: any)
-   default  ---------------------------------------> go
-go -> wave_loop (do-while, max 12)
+trigger -> forecast -> approve_plan (Approval) -Approved-> wave_loop (do-while, max 12)
+                                             -Rejected-> (unconnected: the run ends)
    Iterate:  plan_wave -> reboot_web \
                        -> reboot_app  > wave_settled (Converge: all) -> verify_wave -> wave_outcome (Switch)
                        -> reboot_db  /                   unsafe | stuck -> stop_run
@@ -103,9 +100,7 @@ go -> wave_loop (do-while, max 12)
 | Node | Type | Settings |
 | --- | --- | --- |
 | `forecast` | Job template `rb-forecast` | `max_attempts` = `${trigger.max_attempts}` |
-| `launch_mode` | Switch | Case `dry_run`: `${trigger.dry_run} == true`. Case `approve`: `${trigger.require_approval} == true`. Default to `go` |
 | `approve_plan` | Approval | Prompt includes `${forecast.artifacts.summary}`; `approver_groups` the change board; `decision_window` 3600; `fallback_decision` reject; leave Rejected unconnected |
-| `go` | Converge | `strategy` any, `n_required` 1 |
 | `wave_loop` | While | `condition` `${verify_wave.artifacts.gate} == "continue"`, `max_iterations` 12 |
 | `plan_wave` | Job template `rb-plan-wave` | `run_token` = `${forecast.artifacts.run_token}`, `max_attempts` = `${trigger.max_attempts}` |
 | `reboot_web` | Job template `rb-reboot-web` | `reboot_hosts` = `${plan_wave.artifacts.reboot_web}`, `run_token`; On failure: **Continue on failure** |
@@ -126,7 +121,6 @@ Run `rb-seed` first, then launch the workflow.
 | `scenario` / input | Expected |
 | --- | --- |
 | `happy` | Waves of 6, 4 and 1; the executed waves equal the forecast |
-| `dry_run=true` | Forecast only, no host changes |
 | Approval rejected | Nothing runs |
 | `flaky` | web-02 fails once, the next wave retries it, the run completes |
 | `stubborn` | db-01 is quarantined after 2 attempts, everything else finishes, the run stops `stuck`. Then `heal`, then **Retry run**: only db-01 is planned and the run completes |
@@ -144,7 +138,7 @@ Run `rb-seed` first, then launch the workflow.
 
 ## What was verified
 
-Everything above except the canvas was run on a laptop with ansible-core: see `local/emulate.py`. The node settings and expressions follow the 2026.8 documentation but have not been run on a canvas. Check these first: the Switch case expressions, `${trigger.*}` inputs, Converge `any` after a Switch, and that a tier job set to Continue on failure still lets `wave_settled` fire.
+Everything above except the canvas was run on a laptop with ansible-core: see `local/emulate.py`. The node settings and expressions follow the 2026.8 documentation but have not been run on a canvas. Check these first: the `wave_outcome` case expressions, `${trigger.*}` inputs, and that a tier job set to Continue on failure still lets `wave_settled` fire.
 
 ## Sample artifacts for step testing
 
