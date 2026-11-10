@@ -3,7 +3,8 @@
 # checks decide the outcome. The shim records the result in this host's state
 # file so the probe has something to read, and injects the faults a scenario
 # asks for. It counts attempts per run_token so a new run starts with a fresh
-# budget.
+# budget. While it works, the file says rebooting: true, so local/dashboard.py
+# can show the host as restarting; lab_reboot_seconds (default 0) holds it there.
 - name: Read this host's state
   ansible.builtin.slurp:
     src: "{{ lab_state_dir }}/{{ inventory_hostname }}.json"
@@ -25,6 +26,17 @@
     prior: "{{ sim.attempts | int if sim.attempt_token == sim_token else 0 }}"
     fault: "{{ sim.fault | default({'remaining': 0, 'mode': 'fail'}) }}"
   block:
+    - name: Mark the reboot as in progress
+      ansible.builtin.copy:
+        dest: "{{ lab_state_dir }}/{{ inventory_hostname }}.json"
+        mode: "0644"
+        content: "{{ sim | combine({'rebooting': true}) | to_nice_json }}\n"
+
+    - name: Hold the reboot so it can be watched
+      ansible.builtin.pause:
+        seconds: "{{ lab_reboot_seconds | int }}"
+      when: (lab_reboot_seconds | default(0) | int) > 0
+
     - name: Simulated failure
       when: (fault.remaining | int) > 0
       block:
@@ -32,7 +44,7 @@
           ansible.builtin.copy:
             dest: "{{ lab_state_dir }}/{{ inventory_hostname }}.json"
             mode: "0644"
-            content: "{{ sim | combine({'attempts': (prior | int) + 1, 'attempt_token': sim_token, 'healthy': fault.mode != 'no_return', 'fault': fault | combine({'remaining': (fault.remaining | int) - 1})}) | to_nice_json }}\n"
+            content: "{{ sim | combine({'rebooting': false, 'attempts': (prior | int) + 1, 'attempt_token': sim_token, 'healthy': fault.mode != 'no_return', 'fault': fault | combine({'remaining': (fault.remaining | int) - 1})}) | to_nice_json }}\n"
 
         - name: Take collateral hosts down with it
           ansible.builtin.include_tasks: down_other.yml
@@ -51,7 +63,7 @@
           ansible.builtin.copy:
             dest: "{{ lab_state_dir }}/{{ inventory_hostname }}.json"
             mode: "0644"
-            content: "{{ sim | combine({'pending': false, 'healthy': true, 'attempts': 0, 'attempt_token': sim_token}) | to_nice_json }}\n"
+            content: "{{ sim | combine({'rebooting': false, 'pending': false, 'healthy': true, 'attempts': 0, 'attempt_token': sim_token}) | to_nice_json }}\n"
 
         - name: Print the reboot
           ansible.builtin.debug:

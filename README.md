@@ -31,6 +31,17 @@ ansible-playbook playbooks/lab/seed.yml  -i inventory/storefront.yml -e ansible_
 ansible-playbook playbooks/forecast.yml  -i inventory/storefront.yml -e ansible_connection=local -e lab_state_dir=/tmp/rw
 ```
 
+## Watch it live
+
+`local/dashboard.py` serves a page on your laptop that shows every host as waiting, restarting, done, failed (will be retried), quarantined or down, and each tier's healthy hosts against its minimum. It reads the state files every 2 seconds and needs only Python 3.
+
+```shell
+python3 local/dashboard.py --ssh lab-user@<lab VM address>     # add -i <key> if needed
+python3 local/dashboard.py --dir /tmp/rw                       # a run on this laptop
+```
+
+Open http://localhost:8080. A simulated reboot takes about a second, so to see hosts in the restarting state, set `lab_reboot_seconds` (for example `15`) next to `lab_host` on the `storefront` group in AAP. Each tier job then holds its reboots for that long.
+
 ## Layout
 
 ```text
@@ -50,6 +61,7 @@ playbooks/
   lib/                  probe, live view and the planner shared by the jobs
   lab/                  seed.yml, scenarios.yml and the reboot simulator
 local/emulate.py        the laptop stand-in for the orchestrator
+local/dashboard.py      live status page for the lab fleet
 ```
 
 ## The contract with the existing tier playbooks
