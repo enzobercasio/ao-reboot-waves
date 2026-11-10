@@ -6,6 +6,8 @@
 # Production: replace the slurp with real checks, keep the same `live` shape:
 #   pending   <- `needs-restarting -r` (rc 1) or a patch-compliance fact
 #   healthy   <- the service health check or monitoring API for that host
+# A host the probe cannot reach counts as down: pending, not healthy, so the
+# planner never picks it and it does not count toward the tier's minimum.
 - name: Probe the live state of every host
   hosts: storefront
   gather_facts: false
@@ -14,7 +16,10 @@
       ansible.builtin.slurp:
         src: "{{ lab_state_dir }}/{{ inventory_hostname }}.json"
       register: probe_raw
+      ignore_unreachable: true
 
     - name: Keep it as `live`
       ansible.builtin.set_fact:
-        live: "{{ probe_raw.content | b64decode | from_json }}"
+        live: "{{ (probe_raw.content | b64decode | from_json) if probe_raw.content is defined else unreachable_state }}"
+      vars:
+        unreachable_state: {pending: true, healthy: false, attempts: 0, attempt_token: "", unreachable: true}
